@@ -1,0 +1,48 @@
+# Настройки скрипта. Секреты (ключи API, токен бота) хранятся в .env, а не здесь.
+
+[telegram]
+# Как войти в ваш аккаунт при первом запуске: "qr" (QR-код в терминале) или "phone" (номер и код)
+login = "qr"
+
+# Если боту отправить просто ссылку (без числа и дат), после выжимки непрочитанные сообщения
+# отмечаются в Telegram прочитанными (счётчик чата обнуляется) — до последнего сообщения,
+# которое попало в выжимку. На запросы с числом или датами это не влияет.
+mark_as_read = true
+
+[llm]
+# Какой провайдер делает суммаризацию: "anthropic" | "openai" | "openai_compatible"
+provider = "openai_compatible"
+
+[llm.anthropic]
+model = "claude-sonnet-5-5"      # для экономии можно взять claude-haiku-5-5
+max_tokens = 2000
+# api_key_env = "ANTHROPIC_API_KEY"   # имя переменной окружения с ключом (по умолчанию это)
+
+[llm.openai]
+model = "gpt-5-mini"             # укажите актуальную модель из вашего аккаунта OpenAI
+# max_tokens = 2000
+# api_key_env = "OPENAI_API_KEY"
+
+# Любой сервис с OpenAI-совместимым API: OpenRouter, DeepSeek, Groq, Together,
+# локальные Ollama / vLLM / LM Studio и т.д.
+[llm.openai_compatible]
+#base_url = "http://10.8.0.4:8080/v1"
+#model = "qwen3.8-flash-next-unsloth-ud-q4_k_xl"
+base_url = "https://api.z.ai/api/coding/paas/v4"
+model = "glm-5.3-flash"
+# max_tokens = 200000
+# api_key_env = "OPENAI_COMPATIBLE_API_KEY"
+
+[summary]
+language = "русский"             # язык выжимки
+timezone = "Europe/Moscow"       # по этому часовому поясу сообщения делятся на сутки
+max_messages = 3000              # сколько непрочитанных брать за один запрос (самые старые первыми)
+max_words_per_day = 250          # желаемый объём выжимки одного дня
+chunk_chars = 60000              # если сообщений за день больше, они режутся на части и склеиваются
+max_message_chars = 1500         # длинные сообщения обрезаются
+extra_instructions = ""          # доп. пожелания, например: "Особое внимание уделяй вопросам про релизы."
+include_links = true             # полезные ссылки из переписки попадают в выжимку
+include_message_links = true     # у важных тем ссылка на сообщение в чате (для чатов, у которых такие ссылки бывают)
+max_media_per_day = 5            # сколько фото/видео/гифок приложить к выжимке одного дня; 0 — не прикладывать
+max_media_mb = 20                # вложения крупнее этого размера пропускаются
+min_messages_per_day = 100       # день, в котором сообщений меньше, объединяется со следующим (0 — не объединять)
