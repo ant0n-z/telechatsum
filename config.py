@@ -35,6 +35,7 @@ class Settings:
     sessions_dir: Path
     login_method: str = "qr"  # "qr" | "phone"
     mark_as_read: bool = True  # после выжимки непрочитанных отметить их прочитанными
+    max_saved_chats: int = 30  # сколько чатов хранить в меню бота на одного пользователя
 
 
 def _require(name: str) -> str:
@@ -72,6 +73,10 @@ def load_settings() -> Settings:
     if not isinstance(mark_as_read, bool):
         raise SystemExit("[telegram].mark_as_read в config.toml должен быть true или false")
 
+    max_saved = cfg.get("bot", {}).get("max_saved_chats", 30)
+    if isinstance(max_saved, bool) or not isinstance(max_saved, int) or max_saved < 1:
+        raise SystemExit("[bot].max_saved_chats в config.toml должен быть целым числом >= 1")
+
     min_per_day = SUMMARY_DEFAULTS["min_messages_per_day"]
     min_per_day = cfg.get("summary", {}).get("min_messages_per_day", min_per_day)
     if isinstance(min_per_day, bool) or not isinstance(min_per_day, int) or min_per_day < 0:
@@ -87,4 +92,5 @@ def load_settings() -> Settings:
         sessions_dir=sessions_dir,
         login_method=login_method,
         mark_as_read=mark_as_read,
+        max_saved_chats=max_saved,
     )

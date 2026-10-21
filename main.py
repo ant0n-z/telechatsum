@@ -15,11 +15,14 @@ from auth import login_user
 from config import load_settings
 from llm import LLMError, build_provider
 from media import send_media
+from menu import MENU_TEXT, handle_callback, keyboard_button, show_menu
+from store import ChatStore
 from summarize import summarize_by_day
 from tg_fetch import (
     ChatAccessError,
     RequestError,
     can_mark_read,
+    canonical_ref,
     fetch_for_request,
     mark_read,
     parse_request,
@@ -42,8 +45,13 @@ HELP = (
     "ссылка без номера — всю группу.\n\n"
     "Аккаунт, под которым запущен скрипт, должен состоять в чате (публичные каналы с числом "
     "или датами можно читать и без вступления). Если включён mark_as_read, после выжимки "
-    "непрочитанных (запрос без числа и дат) они отмечаются прочитанными в Telegram."
+    "непрочитанных (запрос без числа и дат) они отмечаются прочитанными в Telegram.\n\n"
+    "Каждый чат, который удалось открыть, автоматически попадает в список «📋 Мои чаты» "
+    "(кнопка под полем ввода или команда /menu). Нажатие на название в списке присылает выжимку "
+    "непрочитанных, 🗑 убирает чат из списка."
 )
+
+COMMANDS = [("menu", "Список сохранённых чатов"), ("help", "Справка")]
 
 
 async def send_long(event, text: str, limit: int = 4000) -> None:
@@ -72,8 +80,31 @@ async def main() -> None:
     bot = TelegramClient(str(settings.sessions_dir / "bot"), settings.api_id, settings.api_hash)
     await login_user(user, settings.login_method)  # при первом запуске: QR-код (или телефон)
     await bot.start(bot_token=settings.bot_token)
+    store = ChatStore(settings.sessions_dir / "chats.json", settings.max_saved_chats)
+
+    try:  # команды в синем «Меню» бота; если не вышло, бот всё равно работает
+        from telethon.tl.functions.bots import SetBotCommandsRequest
+        from telethon.tl.types import BotCommand, BotCommandScopeDefault
+
+        await bot(
+            SetBotCommandsRequest(
+                scope=BotCommandScopeDefault(),
+                lang_code="",
+                commands=[BotCommand(command=c, description=d) for c, d in COMMANDS],
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("Не удалось задать список команд бота: %s", e)
 
     lock = asyncio.Lock()  # один запрос за раз, чтобы не упереться в лимиты
+
+    async def start_request(event, req) -> None:
+        """Общая точка входа для ссылки в сообщении и для кнопки меню."""
+        if lock.locked():
+            await event.respond("Ещё обрабатываю предыдущий запрос, подождите.")
+            return
+        async with lock:
+            await handle_request(event, req)
 
     async def handle_request(event, req) -> None:
         status = await event.respond("⏳ Читаю чат…")
@@ -89,6 +120,23 @@ async def main() -> None:
                 topic,
             )
             info = f"\nℹ️ {topic_note}" if topic_note else ""
+
+            # чат открылся — запоминаем его в меню (автоматически, всегда)
+            saved_ref = canonical_ref(entity, topic)
+            if saved_ref is not None:
+                try:
+                    _saved, is_new = store.add_or_touch(event.sender_id, saved_ref, batch.title)
+                except OSError as e:
+                    log.warning("Не удалось сохранить список чатов: %s", e)
+                    is_new = False
+                if is_new:
+                    info += f"\n➕ Чат добавлен в список «{MENU_TEXT}»"
+                    if len(store.list(event.sender_id)) == 1:
+                        # первый сохранённый чат: показываем постоянную кнопку под полем ввода
+                        await event.respond(
+                            f"Кнопка «{MENU_TEXT}» внизу открывает список сохранённых чатов.",
+                            buttons=keyboard_button(),
+                        )
             if not batch.messages:
                 if batch.mode == "unread":
                     await status.edit(f"В «{batch.title}» нет непрочитанных сообщений.{info}")
@@ -147,7 +195,10 @@ async def main() -> None:
             return
         text = (event.raw_text or "").strip()
         if text.startswith(("/start", "/help")):
-            await event.respond(HELP)
+            await event.respond(HELP, buttons=keyboard_button())
+            return
+        if text.startswith("/menu") or text == MENU_TEXT:
+            await show_menu(event, store)
             return
         try:
             req = parse_request(text, settings.summary["timezone"])
@@ -160,11 +211,14 @@ async def main() -> None:
                 "https://t.me/durov 01.10 10.10 (подробности: /help)"
             )
             return
-        if lock.locked():
-            await event.respond("Ещё обрабатываю предыдущий запрос, подождите.")
+        await start_request(event, req)
+
+    @bot.on(events.CallbackQuery())
+    async def on_callback(event) -> None:
+        if event.sender_id not in settings.allowed_user_ids:
+            await event.answer("Нет доступа", alert=True)
             return
-        async with lock:
-            await handle_request(event, req)
+        await handle_callback(event, store, start_request)
 
     log.info("Бот запущен. Отправьте ему ссылку на чат.")
     try:

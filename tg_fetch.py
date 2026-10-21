@@ -23,7 +23,16 @@ from telethon.tl.functions.messages import (
     GetPeerDialogsRequest,
     ReadDiscussionRequest,
 )
-from telethon.tl.types import Channel, ChatInviteAlready, InputDialogPeer, Message, PeerChannel
+from telethon.tl.types import (
+    Channel,
+    Chat,
+    ChatInviteAlready,
+    InputDialogPeer,
+    Message,
+    PeerChannel,
+    PeerChat,
+    User,
+)
 
 
 class ChatAccessError(Exception):
@@ -36,7 +45,7 @@ class RequestError(Exception):
 
 @dataclass(frozen=True)
 class ChatRef:
-    kind: str  # "username" | "channel_id" | "invite"
+    kind: str  # "username" | "channel_id" | "chat_id" (обычная малая группа) | "invite"
     value: str
     # Первое число после имени чата. Если чат — форум и такая тема есть, читается только она;
     # в обычных группах это номер сообщения и игнорируется.
@@ -176,7 +185,12 @@ async def resolve_entity(client: TelegramClient, ref: ChatRef):
                 "Аккаунт скрипта не состоит в этом чате. Вступите в него вручную и пришлите ссылку ещё раз."
             )
 
-        peer = PeerChannel(int(ref.value)) if ref.kind == "channel_id" else ref.value
+        if ref.kind == "channel_id":
+            peer = PeerChannel(int(ref.value))
+        elif ref.kind == "chat_id":
+            peer = PeerChat(int(ref.value))
+        else:
+            peer = ref.value
         try:
             return await client.get_entity(peer)
         except ValueError:
@@ -207,6 +221,25 @@ def build_link_base(entity) -> str | None:
     if username:
         return f"https://t.me/{username}"
     return f"https://t.me/c/{entity.id}"
+
+
+def canonical_ref(entity, topic: "Topic | None" = None) -> ChatRef | None:
+    """Устойчивая ссылка на чат для сохранения в меню: публичное имя, иначе числовой id.
+
+    Инвайт-ссылки протухают, поэтому сохраняется то, что получилось после открытия чата.
+    Для личных диалогов без публичного имени вернётся None (открыть их позже нельзя).
+    """
+    topic_id = topic.id if topic else None
+    if isinstance(entity, Channel):
+        username = getattr(entity, "username", None)
+        if username:
+            return ChatRef("username", username, topic_id)
+        return ChatRef("channel_id", str(entity.id), topic_id)
+    if isinstance(entity, Chat):
+        return ChatRef("chat_id", str(entity.id))
+    if isinstance(entity, User) and getattr(entity, "username", None):
+        return ChatRef("username", entity.username)
+    return None
 
 
 # ---------------------------------------------------------------- темы форума
